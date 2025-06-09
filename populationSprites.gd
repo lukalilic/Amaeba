@@ -1,161 +1,146 @@
 extends Node2D
 
-@export var Individuals:Array
+@export var Individuals: Array
 @export var MainScene: PackedScene
 
+var numberOfIndividuals = 0
+var subViews = []
+
+# GENERATOR GENA
 func createRandom():
-	var reflexMatrix=[		randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-							randf()-.5,randf()-.5,
-	]
+	var reflexMatrix = []
+	for i in range(16):
+		reflexMatrix.append(randf() - 0.5)
 	return reflexMatrix
 
-
+# KLASA INDIVIDUAL
 class Individual extends Object:
-	func _init(genes,name):
-		self.genes=genes
-		self.name=name
+	func _init(genes, name):
+		self.genes = genes
+		self.name = name
 	
-	var name="";
+	var name = ""
+	var genes = []
+	var representation: Area2D = null
+	var score = -1
+	var bestScore = 0
 	
-	var genes=[]
-	var representation:Area2D=null
-	var score=-1
-	var bestScore=0
 	func getScore(score):
-		self.score=score
-		print(self.score)
-		printerr("got score")
-		if score>self.bestScore:
-			self.bestScore=score
+		self.score = score
+		if score > self.bestScore:
+			self.bestScore = score
 		self.gotScore.emit(self)
 	
-	signal gotScore(individual:Individual)
+	signal gotScore(individual: Individual)
 
+# KOPIRANJE JEDINKE
 func shallowCopy(ind):
-	var new_Ind=Individual.new(ind.genes,ind.name+"I")
-	new_Ind.bestScore=ind.bestScore
-	return new_Ind;
+	var new_Ind = Individual.new(ind.genes.duplicate(), ind.name + "I")
+	new_Ind.bestScore = ind.bestScore
+	return new_Ind
 
+# SIGNAL: SVE JEDINKE DOBILE SKOR
 func Ind_got_score(ind):
-	var count=0
 	for i in Individuals:
-		if(i.score<0):
-			count+=1
-	if(count==0):
-		printerr("done scoring")
-		newGeneration()
+		if i.score < 0:
+			return
+	newGeneration()
 
-var subViews=[]
-
+# SELEKCIJA: najbolji uvek preživi + nasumični odabrani
 func select(population):
-	# ovde kucate kod koji obavlja proces selekcije.
-	# treba da vratite podskup populacije
-	# primer:
-	# jedinke populacije su sortirane po uspesnosti
-	# pa samo uzimamo uspesniju polovinu
-	var chosen=[]
-	for i in range(int(len(population)/2)):
-		chosen.append(population[i])
-	return chosen;
+	population.sort_custom(func(ind1, ind2): return ind1.score > ind2.score)
+	var chosen = []
+	chosen.append(population[0])  # najbolji
+	while chosen.size() < int(len(population) / 2):
+		var candidate = population[randi_range(1, len(population) / 2)]
+		if not candidate in chosen:
+			chosen.append(candidate)
+	return chosen
+
+# UKRŠTANJE: koristi više metoda kombinovanja gena
 func cross(population):
-	# ovde kucate kod koji obavlja proces ukrstanja
-	# cilj je da se napravi nov objekat sa reflexMatrix
-	# koji je napravljen od delova svojih "roditelja"
-	# primer:
-	var children=[]
-	# polovina sledece populacije ce biti roditelji
+	var children = []
 	for p in population:
-		children.append(p)
-	#ukrstamo na dalje nasumicno 2 roditelja tako da dobijemo uvek
-	# 2 deteta sa "suprotnim" osobinama oba roditelja
-	# tako cemo ponovo dobiti isti broj jedinki za sledecu generaciju
-	for parent1 in population:
-		# izabrati 2 roditelja, prvi uzimamo redom, a drugog 
-		# biramo nasumicno. Ovaj deo koda mozete da menjate 
-		# odabir je na vama, ovo je samo primer
-		var parent2=population[randi_range(0,len(population)-1)];
-		#kopiranje matrice
-		var child1=[]
-		var child2=[]
-		for i in range(16):# broj elemenata matrice (gena)
-			var odabir=randf() 	#bacamo novcic i biramo gen prvog 
-								# ili drugog roditelja
-			if(odabir<=0.5):
-				child1.append(parent1.genes[i])
-				child2.append(parent2.genes[i])
+		children.append(shallowCopy(p))  # roditelji ostaju
+
+	while children.size() < subViews.size():
+		var parent1 = population[randi_range(0, population.size() - 1)]
+		var parent2 = population[randi_range(0, population.size() - 1)]
+		var child_genes = []
+
+		for i in range(16):
+			var method = randi_range(0, 2)
+			if method == 0:
+				child_genes.append(randf() < 0.5 ? parent1.genes[i] : parent2.genes[i])
+			elif method == 1:
+				child_genes.append((parent1.genes[i] + parent2.genes[i]) / 2.0)
 			else:
-				child2.append(parent1.genes[i])
-				child1.append(parent2.genes[i])
-		children.append(Individual.new(child1,str(numberOfIndividuals)))
-		#children.append(Individual.new(child2,str(numberOfIndividuals+1)))
-		numberOfIndividuals+=1
+				child_genes.append(i < 8 ? parent1.genes[i] : parent2.genes[i])
+
+		var child = Individual.new(child_genes, "C" + str(numberOfIndividuals))
+		numberOfIndividuals += 1
+		children.append(child)
+
 	return children
 
-var numberOfIndividuals=0
+# MUTACIJA: više jedinki, nasumične promene gena
 func mutate(population):
-	# ovde kucate kod koji obavlja proces mutacije.
-	# izaberete jednu, ili mali broj jedinki,
-	# i promenite joj nasumicno na neki nacin reflexMatrix
-	var mutated=population[randi_range(0,len(population)-1)]
-	mutated.genes[randi_range(0,16-1)]=randf()-0.5
-	mutated.name=mutated.name+"M"
-	return population;
+	for i in population:
+		if randf() < 0.3:
+			var index = randi_range(0, 15)
+			i.genes[index] = randf() - 0.5
+			i.name += "M"
+	return population
 
+# NOVA GENERACIJA
 func newGeneration():
-	var population=[]
-	
-	Individuals.sort_custom(func(ind1,ind2) : return ind1.score>ind2.score)
+	var population = []
+	Individuals.sort_custom(func(ind1, ind2): return ind1.score > ind2.score)
 	for i in Individuals:
 		population.append(shallowCopy(i))
-	population=mutate(cross(select(population)))
-	reset(population);
 
+	population = select(population)
+	population = cross(population)
+	population = mutate(population)
+
+	if population.size() > subViews.size():
+		population = population.slice(0, subViews.size())
+
+	reset(population)
+
+# RESETUJ SCENU
 func reset(population):
-	#clear subviews
 	for v in subViews:
 		for n in v.get_children():
 			v.remove_child(n)
 			n.queue_free()
-	Individuals=[]
+
+	Individuals = []
 	for i in range(len(subViews)):
-		var ms=MainScene.instantiate()
-		var ind=population[i]
-		ind.representation=ms
+		var ms = MainScene.instantiate()
+		var ind = population[i]
+		ind.representation = ms
 		Individuals.append(ind)
 		ind.gotScore.connect(Ind_got_score)
-		ms.reflexMatrix=ind.genes
-		
+		ms.reflexMatrix = ind.genes
 		ms.gameover.connect(ind.getScore)
-		ms.NameLabel=ind.name
-		ms.BestScore=ind.bestScore;
+		ms.NameLabel = ind.name
+		ms.BestScore = ind.bestScore
 		subViews[i].add_child(ms)
-	
 
+# START
 func _ready():
 	seed(43)
-	var gridchildren=$GridContainer.get_children()
-	#subViews=[$GridContainer/SubViewportContainer/SubViewport,$GridContainer/SubViewportContainer2/SubViewport
-	#,$GridContainer/SubViewportContainer3/SubViewport,$GridContainer/SubViewportContainer4/SubViewport]
-	#Individuals=[$SubViewportContainer/SubViewport/Main,$SubViewportContainer2/SubViewport/Main]
-	subViews=[]
+	subViews = []
+	var gridchildren = $GridContainer.get_children()
 	for g in gridchildren:
 		subViews.append(g.get_child(0))
-	var population=[]
-	var i=0
-	for m in subViews:
-		population.append(Individual.new(createRandom(),"{"+str(i)+"}"))
-		i+=1
-		numberOfIndividuals+=1
-	reset(population);
-	
+
+	var population = []
+	for i in range(subViews.size()):
+		population.append(Individual.new(createRandom(), "{" + str(i) + "}"))
+		numberOfIndividuals += 1
+	reset(population)
 
 func _process(delta):
 	pass
-
-
